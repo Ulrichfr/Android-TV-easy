@@ -1,0 +1,53 @@
+# Philips 2021/22 UHD Android TV (device PH1M_EA_9970A, product PH1M_EA_9970A, TPV)
+# Android 11, firmware RTT2.211108.001. MediaTek / Philips org.droidtv.* platform.
+#
+# Apply:   TV_HOST=<tv ip> tools/disable.sh examples/philips-2021-uhd/debloat.txt
+# Undo:    TV_HOST=<tv ip> tools/restore.sh examples/philips-2021-uhd/debloat.txt
+# Everything is DISABLED for user 0, not uninstalled. Comment out any line you want to keep.
+#
+# Stock launcher: com.google.android.tvlauncher. It is not in this list. Installing the
+# launcher (launcher/build-and-install.sh) disables it so Home opens com.gathin.tvhome.
+# restore.sh re-enables it and sets it back as Home. Live TV app: org.droidtv.playtv.
+#
+# Kept on purpose: Ambilight (org.droidtv.ambiair, org.droidtv.ambihuecommon), HDMI, the
+# tuner, the remote, Play Store, Google Play services, and Chromecast
+# (com.google.android.apps.mediashell). Do not add those here.
+#
+# Launcher for this set: French strings in launcher/app/src/main/res/values-fr/, dock in
+# launcher/app/src/main/res/values/config.xml (OQEE / Free, Crunchyroll, ADN, Netflix).
+# Prime Video, Apple TV, YouTube, Disney+ and France TV stay installed; they are just not
+# pinned to the four dock slots.
+#
+# Screensaver was pointed at com.gathin.tvhome/.ClockDream. screen_off_timeout was left at
+# 604800000 (Philips "never", 7 days), so the clock dream does not appear unless that
+# timeout is shortened. That timeout is a whole-TV setting, relevant on an OLED.
+
+# Sponsored rows and recommendations
+com.google.android.tvrecommendations
+org.droidtv.recommendation
+org.droidtv.nettvrecommender
+org.droidtv.fastip
+
+# Telemetry and usage logging
+org.droidtv.usagelogger
+org.droidtv.gel
+org.droidtv.tv.frameworklogger
+org.droidtv.nettvregistration
+
+# Retail demo and partner rows on the stock launcher
+org.droidtv.demome
+org.droidtv.leanbackcustomizer
+android.autoinstalls.config.tpv.device
+
+# Declined on this set: Philips over-the-air firmware updates, Alexa, Play-Fi, DLNA,
+# Mimi sound personalisation, Philips Fitness. Re-enable the oad lines before a firmware
+# update if the TV no longer offers one from Settings.
+org.droidtv.oad
+com.easy.oad
+org.droidtv.amazonalexa
+com.phorus.playfi.tv
+com.phorus.playfi.softap
+org.droidtv.dlna
+io.mimi.tvapp
+io.mimi.sdk.service
+org.droidtv.android.fitness
