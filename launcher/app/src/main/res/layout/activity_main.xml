@@ -5,6 +5,32 @@
     android:layout_height="match_parent"
     android:background="#FF000000">
 
+    <!-- Blurred artwork of the focused app. Two layers so a focus change can crossfade. -->
+    <ImageView
+        android:id="@+id/wallpaperA"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitXY"
+        android:alpha="0"
+        android:focusable="false"
+        android:importantForAccessibility="no" />
+
+    <ImageView
+        android:id="@+id/wallpaperB"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitXY"
+        android:alpha="0"
+        android:focusable="false"
+        android:importantForAccessibility="no" />
+
+    <View
+        android:id="@+id/wallpaperScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/wallpaper_scrim"
+        android:importantForAccessibility="no" />
+
     <!-- Ambient glow in the colour of the focused dock app. -->
     <View
         android:id="@+id/ambient"
@@ -151,12 +177,14 @@
             </LinearLayout>
         </RelativeLayout>
 
-        <!-- The wrapper clips at the grid's edge; the grid itself must not clip so scaled tiles can overflow their cells. -->
+        <!-- The grid must not clip its own cells, so a focused tile can scale past its slot.
+             Clip bounds in code keep that drawing below the coast card, which is painted last. -->
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginTop="10dp">
+            android:layout_marginTop="10dp"
+            android:clipChildren="true">
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/grid"
@@ -164,11 +192,19 @@
                 android:layout_height="match_parent"
                 android:paddingTop="10dp"
                 android:paddingBottom="40dp"
+                android:background="@android:color/transparent"
                 android:clipToPadding="false"
                 android:clipChildren="false"
                 android:overScrollMode="never"
                 android:scrollbars="none"
                 android:descendantFocusability="afterDescendants" />
+
+            <include
+                android:id="@+id/coast"
+                layout="@layout/widget_coast"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
         </FrameLayout>
     </LinearLayout>
 

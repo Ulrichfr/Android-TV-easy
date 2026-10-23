@@ -25,4 +25,9 @@
 
     <!-- Tiles per row in the grid; the dock always has this many slots. -->
     <integer name="columns">4</integer>
+
+    <!-- Home widget: Quiberon weather (Open-Meteo) and Port-Maria tides (SHOM). -->
+    <string name="coast_harbor_name" translatable="false">PORT-MARIA</string>
+    <string name="coast_lat" translatable="false">47.4833</string>
+    <string name="coast_lon" translatable="false">-3.1333</string>
 </resources>

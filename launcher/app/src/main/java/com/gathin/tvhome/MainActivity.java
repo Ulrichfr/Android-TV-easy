@@ -5,9 +5,11 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
@@ -44,7 +46,11 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * tvOS style home: black, a pinned dock row, an app grid, and one glass highlight that springs between tiles.
@@ -61,12 +67,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private FrameLayout root;
     private GlassView glass;
     private View ambient;
+    private ImageView wallA, wallB;
+    private boolean wallOnA;
+    private String wallKey;
+    private int wallGen;
+    private final Map<String, Bitmap> wallCache = new HashMap<>();
+    private final ExecutorService wallExec = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "wallpaper");
+        t.setPriority(Thread.NORM_PRIORITY - 1);
+        return t;
+    });
     private TextView heroName;
     private GradientDrawable ambientGlow;
     private int ambientColor;
     private boolean heroShown;
     private TextView greeting;
     private TextView btnWifi;
+    private Coast coast;
+    /** True while the coast card is shown. It leaves as soon as focus moves into the app grid. */
+    private boolean coastShown = true;
+    private int coastAnim;
     private SpringAnimation springX, springY;
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
@@ -82,7 +102,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
         @Override
         public void onAvailable(@NonNull Network network) {
-            handler.post(MainActivity.this::updateWifiLabel);
+            handler.post(() -> {
+                updateWifiLabel();
+                if (coast != null) coast.refresh();
+            });
         }
 
         @Override
@@ -95,6 +118,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         public void run() {
             updateGreeting();
             updateWifiLabel();
+            if (coast != null) coast.tick();
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -110,6 +134,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         root = findViewById(R.id.root);
         glass = findViewById(R.id.glass);
         ambient = findViewById(R.id.ambient);
+        wallA = findViewById(R.id.wallpaperA);
+        wallB = findViewById(R.id.wallpaperB);
         heroName = findViewById(R.id.heroName);
         ambientGlow = new GradientDrawable();
         ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
@@ -138,6 +164,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (grid.getPaddingTop() != want) {
                 grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
             }
+            clipGridBelowWidget();
         });
 
         // Keep the glass glued to its tile while the grid scrolls.
@@ -176,6 +203,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnWifi.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
 
+        coast = new Coast(this);
+        View coastView = findViewById(R.id.coast);
+        coast.attach(coastView);
+        coastView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> clipGridBelowWidget());
+
         // Hide the glass when focus leaves the tiles.
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
             boolean onTile = newF != null && newF.getId() == R.id.card;
@@ -201,6 +233,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.scheduleLayoutAnimation();
         updateGreeting();
         updateWifiLabel();
+        coast.refresh();
         handler.postDelayed(minuteTick, MINUTE_MS);
 
         // Return to the app we left from, or the same slot if that app is gone. Always refocus: after
@@ -222,6 +255,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onDestroy();
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         if (cm != null) cm.unregisterNetworkCallback(networkCallback);
+        if (coast != null) coast.close();
+        wallExec.shutdownNow();
     }
 
     @Override
@@ -235,6 +270,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     public void onTileFocused(int position, View card) {
         lastFocused = position;
         lastFocusedKey = adapter.keyAt(position);
+        showWallpaper(position);
         // Tile rect in root coordinates, using layout positions (ignores the scale animation).
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
@@ -271,12 +307,98 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             int dy = decoratedTop - grid.getPaddingTop();
             if (Math.abs(dy) > 1) grid.smoothScrollBy(0, dy);
             showHero(position, r.top - dy);
+            setCoastVisible(true);
         } else {
             hideHero();
-            // Scroll just enough so the whole glass (not only the tile) is visible.
+            // The card gets out of the way so the rows can use that band. Leaving it up paints it
+            // over the icons.
+            setCoastVisible(false);
             Rect want = new Rect(0, -(int) pad * 2, item.getWidth(), item.getHeight() + (int) pad);
             grid.requestChildRectangleOnScreen(item, want, false);
         }
+    }
+
+    /** While the card is on screen, tiles must not draw through it. Once it leaves, the grid is free. */
+    private void clipGridBelowWidget() {
+        if (!coastShown) {
+            if (grid.getClipBounds() != null) grid.setClipBounds(null);
+            return;
+        }
+        View coastView = findViewById(R.id.coast);
+        if (coastView == null || grid.getWidth() == 0 || grid.getHeight() == 0) return;
+        int clipTop = coastView.getBottom() - grid.getTop();
+        if (clipTop < 0) clipTop = 0;
+        if (clipTop > grid.getHeight()) clipTop = grid.getHeight();
+        Rect current = grid.getClipBounds();
+        if (current != null && current.top == clipTop && current.left == 0
+                && current.right == grid.getWidth() && current.bottom == grid.getHeight()) {
+            return;
+        }
+        grid.setClipBounds(new Rect(0, clipTop, grid.getWidth(), grid.getHeight()));
+    }
+
+    private void setCoastVisible(boolean show) {
+        View coastView = findViewById(R.id.coast);
+        if (coastView == null || show == coastShown) return;
+        coastShown = show;
+        final int gen = ++coastAnim;
+        coastView.animate().cancel();
+        if (show) {
+            coastView.setVisibility(View.VISIBLE);
+            coastView.animate().alpha(1f).translationY(0f).setDuration(220).start();
+            clipGridBelowWidget();
+        } else {
+            grid.setClipBounds(null);
+            coastView.animate().alpha(0f).translationY(-8f * density).setDuration(160).withEndAction(() -> {
+                if (gen == coastAnim && !coastShown) coastView.setVisibility(View.INVISIBLE);
+            }).start();
+        }
+    }
+
+    /** Crossfades the backdrop to this app's artwork. Stays up while the grid scrolls. */
+    private void showWallpaper(int position) {
+        final String key = adapter.keyAt(position);
+        if (key == null || key.equals(wallKey)) return;
+        Bitmap cached = wallCache.get(key);
+        if (cached != null && !cached.isRecycled()) {
+            wallKey = key;
+            wallGen++;
+            crossfadeWall(cached);
+            return;
+        }
+        Drawable live = adapter.artAt(position);
+        Bitmap source = HeroArt.snapshot(live);
+        if (source == null) return;
+        wallKey = key;
+        final int gen = ++wallGen;
+        wallExec.execute(() -> {
+            Bitmap art;
+            try {
+                art = HeroArt.soften(source);
+            } catch (RuntimeException ex) {
+                if (!source.isRecycled()) source.recycle();
+                return;
+            }
+            handler.post(() -> {
+                if (art == null) return;
+                wallCache.put(key, art);
+                if (isDestroyed() || gen != wallGen) return;
+                crossfadeWall(art);
+            });
+        });
+    }
+
+    private void crossfadeWall(Bitmap art) {
+        ImageView incoming = wallOnA ? wallB : wallA;
+        ImageView outgoing = wallOnA ? wallA : wallB;
+        incoming.animate().cancel();
+        outgoing.animate().cancel();
+        incoming.setImageBitmap(art);
+        incoming.setAlpha(0f);
+        if (outgoing.getDrawable() != null) outgoing.setAlpha(1f);
+        incoming.animate().alpha(1f).setDuration(520).start();
+        outgoing.animate().alpha(0f).setDuration(520).start();
+        wallOnA = !wallOnA;
     }
 
     // ---- top shelf -------------------------------------------------------------------------------
@@ -284,7 +406,18 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private void showHero(int position, float dockTopInRoot) {
         String label = adapter.labelAt(position);
         int color = adapter.ambientColorAt(position);
-        float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
+        // The title is drawn behind the coast card, so keep it below the card.
+        float shelf = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
+        View coast = findViewById(R.id.coast);
+        if (coast != null && coast.getHeight() > 0) {
+            int[] coastAt = new int[2];
+            int[] rootAt = new int[2];
+            coast.getLocationInWindow(coastAt);
+            ((View) heroName.getParent()).getLocationInWindow(rootAt);
+            float floor = coastAt[1] - rootAt[1] + coast.getHeight() + 8 * density;
+            if (shelf < floor) shelf = floor;
+        }
+        final float y = shelf;
         boolean changed = !label.contentEquals(heroName.getText());
 
         if (!heroShown) {
